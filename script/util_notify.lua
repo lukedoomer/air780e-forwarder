@@ -25,7 +25,7 @@ local function notifyToTelegram(msg)
     }
 
     log.info("util_notify.notifyToTelegram", "POST", config.TELEGRAM_PROXY_API)
-    return http.request("POST", config.TELEGRAM_PROXY_API, header, msg).wait()
+    return util_http.httpWithTimeout(nil, "POST", config.TELEGRAM_PROXY_API, header, msg)
 end
 
 -- 发送到 pushdeer
@@ -49,7 +49,7 @@ local function notifyToPushDeer(msg)
     }
 
     log.info("util_notify.notifyToPushDeer", "POST", config.PUSHDEER_API)
-    return http.request("POST", config.PUSHDEER_API, header, urlencodeTab(body)).wait()
+    return util_http.httpWithTimeout(nil, "POST", config.PUSHDEER_API, header, urlencodeTab(body))
 end
 
 -- 发送到 bark
@@ -72,7 +72,7 @@ local function notifyToBark(msg)
     local url = config.BARK_API .. "/" .. config.BARK_KEY
 
     log.info("util_notify.notifyToBark", "POST", url)
-    return http.request("POST", url, header, urlencodeTab(body)).wait()
+    return util_http.httpWithTimeout(nil, "POST", url, header, urlencodeTab(body))
 end
 
 -- 发送到 dingtalk
@@ -95,8 +95,8 @@ local function notifyToDingTalk(msg)
     -- LuatOS Bug, json.encode 会将 \n 转换为 \b
     json_data = string.gsub(json_data, "\\b", "\\n")
 
-    log.info("util_notify.notifyToDingTalk", "POST", config.DINGTALK_WEBHOOK, json_data)
-    return http.request("POST", config.DINGTALK_WEBHOOK, header, json_data).wait()
+    log.info("util_notify.notifyToDingTalk", "POST", config.DINGTALK_WEBHOOK)
+    return util_http.httpWithTimeout(nil, "POST", config.DINGTALK_WEBHOOK, header, json_data)
 end
 
 -- 发送到 feishu
@@ -119,8 +119,8 @@ local function notifyToFeishu(msg)
     -- LuatOS Bug, json.encode 会将 \n 转换为 \b
     json_data = string.gsub(json_data, "\\b", "\\n")
 
-    log.info("util_notify.notifyToFeishu", "POST", config.FEISHU_WEBHOOK, json_data)
-    return http.request("POST", config.FEISHU_WEBHOOK, header, json_data).wait()
+    log.info("util_notify.notifyToFeishu", "POST", config.FEISHU_WEBHOOK)
+    return util_http.httpWithTimeout(nil, "POST", config.FEISHU_WEBHOOK, header, json_data)
 end
 
 -- 发送到 wecom
@@ -143,8 +143,8 @@ local function notifyToWeCom(msg)
     -- LuatOS Bug, json.encode 会将 \n 转换为 \b
     json_data = string.gsub(json_data, "\\b", "\\n")
 
-    log.info("util_notify.notifyToWeCom", "POST", config.WECOM_WEBHOOK, json_data)
-    return http.request("POST", config.WECOM_WEBHOOK, header, json_data).wait()
+    log.info("util_notify.notifyToWeCom", "POST", config.WECOM_WEBHOOK)
+    return util_http.httpWithTimeout(nil, "POST", config.WECOM_WEBHOOK, header, json_data)
 end
 
 -- 发送到 next-smtp-proxy
@@ -188,86 +188,114 @@ local function notifyToNextSmtpProxy(msg)
         text = msg
     }
 
-    log.info("util_notify.notifyToNextSmtpProxy", "POST", config.NEXT_SMTP_PROXY_API, urlencodeTab(body))
-    return http.request("POST", config.NEXT_SMTP_PROXY_API, header, urlencodeTab(body)).wait()
+    log.info("util_notify.notifyToNextSmtpProxy", "POST", config.NEXT_SMTP_PROXY_API)
+    return util_http.httpWithTimeout(nil, "POST", config.NEXT_SMTP_PROXY_API, header, urlencodeTab(body))
 end
 
-function util_notify.send(msg)
-    log.info("util_notify.send", "发送通知", config.NOTIFY_TYPE)
-
-    if type(msg) == "table" then
-        msg = table.concat(msg, "\n")
-    end
-    if type(msg) ~= "string" then
-        log.error("util_notify.send", "发送通知失败", "参数类型错误", type(msg))
-        return
-    end
-
-    local model = hmeta.model() or ""
-    local simid = mobile.simid()
-    local iccid = mobile.iccid(simid) or ""
-    local rsrp = mobile.rsrp()
-    local mcc, mnc, band = util_mobile.mcc, util_mobile.mnc, util_mobile.band
-    local oper = util_mobile.getOper(true)
-    local lat, lng = util_location.getCoord()
-    local map_url = "https://apis.map.qq.com/uri/v1/marker?coord_type=1&marker=title:+;coord:" .. lat .. "," .. lng
-
-    msg = msg .. "\n"
-    if model then
-        msg = msg .. "\nMODEL: " .. model
-    end
-    if iccid then
-        msg = msg .. "\nICCID: " .. iccid
-    end
-    if oper then
-        msg = msg .. "\n运营商: " .. oper
-    end
-    msg = msg .. "\n信号: " .. rsrp .. "dBm"
-    if band ~= "" then
-        msg = msg .. "\n频段: B" .. band
-    end
-    if lat ~= 0 and lng ~= 0 then
-        msg = msg .. "\n位置: " .. map_url
-    end
-
-    -- 判断通知类型
-    local notify
-    if config.NOTIFY_TYPE == "telegram" then
-        notify = notifyToTelegram
-    elseif config.NOTIFY_TYPE == "pushdeer" then
-        notify = notifyToPushDeer
-    elseif config.NOTIFY_TYPE == "bark" then
-        notify = notifyToBark
-    elseif config.NOTIFY_TYPE == "dingtalk" then
-        notify = notifyToDingTalk
-    elseif config.NOTIFY_TYPE == "feishu" then
-        notify = notifyToFeishu
-    elseif config.NOTIFY_TYPE == "wecom" then
-        notify = notifyToWeCom
-    elseif config.NOTIFY_TYPE == "next-smtp-proxy" then
-        notify = notifyToNextSmtpProxy
-    else
-        log.error("util_notify.send", "发送通知失败", "未配置 `config.NOTIFY_TYPE`")
-        return
-    end
-
+function util_notify.send(msg, is_append_more_info_disabled)
     sys.taskInit(
         function()
-            local max_retry = 10
+            log.info("util_notify.send", "发送通知", config.NOTIFY_TYPE)
+
+            if type(msg) == "table" then
+                msg = table.concat(msg, "\n")
+            end
+            if type(msg) ~= "string" then
+                log.error("util_notify.send", "发送通知失败", "参数类型错误", type(msg))
+                return
+            end
+            if msg == "" then
+                log.error("util_notify.send", "发送通知失败", "消息为空")
+                return
+            end
+
+            if not is_append_more_info_disabled then
+                msg = msg .. "\n"
+
+                -- 设备型号
+                local model = hmeta.model() -- nil
+                if model then
+                    msg = msg .. "\nMODEL: " .. model
+                end
+
+                -- ICCID
+                local iccid = mobile.iccid(mobile.simid()) -- nil
+                if iccid then
+                    msg = msg .. "\nICCID: " .. iccid
+                end
+
+                -- 开机时长
+                local ms = mcu.ticks()
+                local seconds = math.floor(ms / 1000)
+                local minutes = math.floor(seconds / 60)
+                local hours = math.floor(minutes / 60)
+                seconds = seconds % 60
+                minutes = minutes % 60
+                local boot_time = string.format("%02d:%02d:%02d", hours, minutes, seconds)
+                if ms >= 0 then
+                    msg = msg .. "\n开机时长: " .. boot_time
+                end
+
+                -- 运营商
+                local oper = util_mobile.getOper(true) -- ""
+                if oper ~= "" then
+                    msg = msg .. "\n运营商: " .. oper
+                end
+
+                -- 信号
+                local rsrp = mobile.rsrp() -- 0
+                if rsrp ~= 0 then
+                    msg = msg .. "\n信号: " .. rsrp .. "dBm"
+                end
+
+                -- 频段
+                local band = util_mobile.getBand() -- -1
+                if band ~= -1 then
+                    msg = msg .. "\n频段: B" .. band
+                end
+
+                -- 位置
+                local lat, lng, map_link = util_location.get() -- 0, 0, ""
+                if map_link ~= "" then
+                    msg = msg .. "\n位置: " .. map_link -- 这里使用 U+00a0 防止换行
+                end
+            end
+
+            -- 判断通知类型
+            local notify
+            if config.NOTIFY_TYPE == "telegram" then
+                notify = notifyToTelegram
+            elseif config.NOTIFY_TYPE == "pushdeer" then
+                notify = notifyToPushDeer
+            elseif config.NOTIFY_TYPE == "bark" then
+                notify = notifyToBark
+            elseif config.NOTIFY_TYPE == "dingtalk" then
+                notify = notifyToDingTalk
+            elseif config.NOTIFY_TYPE == "feishu" then
+                notify = notifyToFeishu
+            elseif config.NOTIFY_TYPE == "wecom" then
+                notify = notifyToWeCom
+            elseif config.NOTIFY_TYPE == "next-smtp-proxy" then
+                notify = notifyToNextSmtpProxy
+            else
+                log.error("util_notify.send", "发送通知失败", "未配置 `config.NOTIFY_TYPE`")
+                return
+            end
+
+            local max_retry = 20
             local retry_count = 0
 
             while retry_count < max_retry do
-                util_netled.blink(50, 50)
                 local code, headers, body = notify(msg)
-                util_netled.blink()
+
                 if code == 200 then
                     log.info("util_notify.send", "发送通知成功", "retry_count:", retry_count, "code:", code, "body:", body)
                     break
                 else
                     retry_count = retry_count + 1
+                    local delay = retry_count * retry_count -- 等待时间 = 重试次数^2
                     log.error("util_notify.send", "发送通知失败", "retry_count:", retry_count, "code:", code, "body:", body)
-                    util_netled.blink(500, 200, 3000)
-                    sys.wait(10000)
+                    sys.wait(delay * 1000)
                 end
             end
         end

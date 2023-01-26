@@ -1,7 +1,6 @@
 PROJECT = "air780e_forwarder"
 VERSION = "1.0.0"
 
-log.setLevel("DEBUG")
 log.info("main", PROJECT, VERSION)
 
 sys = require "sys"
@@ -10,9 +9,7 @@ require "sysplus"
 
 -- 添加硬狗防止程序卡死, 在支持的设备上启用这个功能
 if wdt then
-    -- 初始化 watchdog 设置为 9s
     wdt.init(9000)
-    -- 3s 喂一次狗
     sys.timerLoopStart(wdt.feed, 3000)
 end
 
@@ -20,48 +17,67 @@ end
 socket.setDNS(nil, 1, "119.29.29.29")
 socket.setDNS(nil, 2, "223.5.5.5")
 
--- 设置 SIM 自动恢复, 搜索小区信息间隔, 最大搜索时间
-mobile.setAuto(1000 * 10, 1000 * 60, 1000 * 5)
+-- 设置 SIM 自动恢复(单位: 毫秒), 搜索小区信息间隔(单位: 毫秒), 最大搜索时间(单位: 秒)
+mobile.setAuto(1000 * 10)
 
 -- POWERKEY
 local powerkey_timer = 0
 gpio.setup(
     35,
     function()
-        local powerkey_state = gpio.get(35)
-        if powerkey_state == 0 then
-            powerkey_timer = os.time()
+        if gpio.get(35) == 0 then
+            powerkey_timer = mcu.ticks()
         else
             if powerkey_timer == 0 then
                 return
             end
-            local time = os.time() - powerkey_timer
-            if time >= 2 then
-                log.info("POWERKEY_LONG_PRESS", time)
-                sys.publish("POWERKEY_LONG_PRESS")
+            local time_diff = mcu.ticks() - powerkey_timer
+            if time_diff > 2000 then
+                log.debug("EVENT.POWERKEY_LONG_PRESS", time_diff)
+                sys.publish("POWERKEY_LONG_PRESS", time_diff)
             else
-                log.info("POWERKEY_SHORT_PRESS", time)
-                sys.publish("POWERKEY_SHORT_PRESS")
+                log.debug("EVENT.POWERKEY_SHORT_PRESS", time_diff)
+                sys.publish("POWERKEY_SHORT_PRESS", time_diff)
             end
             powerkey_timer = 0
         end
     end,
-    gpio.PULLUP,
-    gpio.FALLING
+    gpio.PULLUP
 )
 
+-- 加载模块
 config = require "config"
+util_http = require "util_http"
 util_netled = require "util_netled"
 util_mobile = require "util_mobile"
 util_location = require "util_location"
 util_notify = require "util_notify"
 
--- 短信回调
+-- 短信接收回调
 sms.setNewSmsCb(
-    function(num, txt, metas)
-        log.info("smsCallback", num, txt, metas and json.encode(metas) or "")
-        util_netled.blink(50, 50, 5000)
-        util_notify.send({txt, "", "发件人号码: " .. num, "#SMS"})
+    function(sender_number, sms_content, m)
+        local time = string.format("%d/%02d/%02d %02d:%02d:%02d", m.year + 2000, m.mon, m.day, m.hour, m.min, m.sec)
+        log.info("smsCallback", time, sender_number, sms_content)
+
+        -- 短信控制
+        local is_sms_ctrl = false
+        local receiver_number, sms_content_to_be_sent = sms_content:match("^SMS,(+?%d+),(.+)$")
+        receiver_number, sms_content_to_be_sent = receiver_number or "", sms_content_to_be_sent or ""
+        if sms_content_to_be_sent ~= "" and receiver_number ~= "" and #receiver_number >= 5 and #receiver_number <= 20 then
+            sms.send(receiver_number, sms_content_to_be_sent)
+            is_sms_ctrl = true
+        end
+
+        -- 发送通知
+        util_notify.send(
+            {
+                sms_content,
+                "",
+                "发件号码: " .. sender_number,
+                "发件时间: " .. time,
+                "#SMS" .. (is_sms_ctrl and " #CTRL" or "")
+            }
+        )
     end
 )
 
@@ -70,16 +86,7 @@ sys.taskInit(
         -- 等待网络环境准备就绪
         sys.waitUntil("IP_READY")
 
-        util_netled.blink(50, 50, 1000)
-
-        -- 开机基站定位
-        util_location.getCoord(
-            function()
-                log.info("publish", "COORD_INIT_DONE")
-                sys.publish("COORD_INIT_DONE")
-            end
-        )
-        sys.waitUntil("COORD_INIT_DONE", 1000 * 20)
+        util_netled.init()
 
         -- 开机通知
         if config.BOOT_NOTIFY then
@@ -92,8 +99,8 @@ sys.taskInit(
         end
 
         -- 定时基站定位
-        if config.LOCATION_INTERVAL and config.LOCATION_INTERVAL >= 1000 * 10 then
-            sys.timerLoopStart(util_location.getCoord, config.LOCATION_INTERVAL)
+        if config.LOCATION_INTERVAL and config.LOCATION_INTERVAL >= 1000 * 20 then
+            sys.timerLoopStart(util_location.refresh, config.LOCATION_INTERVAL, 30)
         end
 
         -- 电源键短按发送测试通知
@@ -105,6 +112,19 @@ sys.taskInit(
         )
         -- 电源键长按查询流量
         sys.subscribe("POWERKEY_LONG_PRESS", util_mobile.queryTraffic)
+
+        -- 关闭电源
+        sys.wait(1000 * 5)
+        pm.power(pm.USB, false) -- 关闭 usb 电源, 查看日志需注释掉
+        pm.power(pm.GPS, false)
+        pm.power(pm.GPS_ANT, false)
+        if pm.DAC_EN then
+            pm.power(pm.DAC_EN, false) -- 最新编译的固件才支持
+        end
+
+        -- 休眠
+        sys.wait(1000 * 5)
+        pm.force(pm.LIGHT)
     end
 )
 
