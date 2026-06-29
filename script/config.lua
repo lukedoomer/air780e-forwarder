@@ -1,6 +1,6 @@
 return {
-    -- 通知类型 telegram, pushdeer, bark, dingtalk, feishu, wecom, next-smtp-proxy
-    NOTIFY_TYPE = "pushdeer",
+    -- 通知类型 telegram, pushdeer, bark, dingtalk, feishu, wecom, slack, next-smtp-proxy
+    NOTIFY_TYPE = "slack",
     --
     -- telegram 通知配置, https://github.com/0wQ/telegram-notify
     TELEGRAM_PROXY_API = "",
@@ -23,6 +23,9 @@ return {
     --
     -- wecom 通知配置, https://developer.work.weixin.qq.com/document/path/91770
     WECOM_WEBHOOK = "",
+    --
+    -- slack 通知配置, https://api.slack.com/messaging/webhooks
+    SLACK_WEBHOOK = "",
     --
     -- next-smtp-proxy 通知配置, https://github.com/0wQ/next-smtp-proxy
     NEXT_SMTP_PROXY_API = "",

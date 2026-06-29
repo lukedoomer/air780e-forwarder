@@ -147,6 +147,28 @@ local function notifyToWeCom(msg)
     return util_http.httpWithTimeout(nil, "POST", config.WECOM_WEBHOOK, header, json_data)
 end
 
+-- 发送到 Slack
+local function notifyToSlack(msg)
+    if config.SLACK_WEBHOOK == nil or config.SLACK_WEBHOOK == "" then
+        log.error("util_notify.notifyToSlack", "未配置`config.SLACK_WEBHOOK`")
+        return
+    end
+
+    local header = {
+        ["content-type"] = "application/json; charset=utf-8"
+    }
+    local body = {
+        text = msg
+    }
+
+    local json_data = json.encode(body)
+    -- LuatOS Bug, json.encode 会将 \n 转换为 \b
+    json_data = string.gsub(json_data, "\\b", "\\n")
+
+    log.info("util_notify.notifyToSlack", "POST", config.SLACK_WEBHOOK)
+    return util_http.httpWithTimeout(nil, "POST", config.SLACK_WEBHOOK, header, json_data)
+end
+
 -- 发送到 next-smtp-proxy
 local function notifyToNextSmtpProxy(msg)
     if config.NEXT_SMTP_PROXY_API == nil or config.NEXT_SMTP_PROXY_API == "" then
@@ -275,6 +297,8 @@ function util_notify.send(msg, is_append_more_info_disabled)
                 notify = notifyToFeishu
             elseif config.NOTIFY_TYPE == "wecom" then
                 notify = notifyToWeCom
+            elseif config.NOTIFY_TYPE == "slack" then
+                notify = notifyToSlack
             elseif config.NOTIFY_TYPE == "next-smtp-proxy" then
                 notify = notifyToNextSmtpProxy
             else
